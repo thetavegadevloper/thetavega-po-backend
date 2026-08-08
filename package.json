@@ -1,0 +1,35 @@
+{
+  "name": "thetavega-po-system-backend",
+  "version": "1.0.0",
+  "description": "Purchase Order Management System backend - Node.js, Express and MongoDB",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "seed": "node src/scripts/seed.js",
+    "check": "node src/scripts/syntaxCheck.js",
+    "test:core": "node --test test/core.test.js",
+    "test:db": "node src/scripts/dbCheck.js",
+    "test:api": "node src/scripts/apiSmokeTest.js",
+    "test": "npm run check && npm run test:core"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.17.1",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "puppeteer": "^24.16.0",
+    "nodemailer": "^7.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
