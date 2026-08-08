@@ -135,7 +135,8 @@ exports.create = async (req, res) => {
   // =====================================================
   // 3. BUILD MASTER SNAPSHOTS
   // =====================================================
-  const snapshots = await buildMasterSnapshots(payload);
+  const snapshots =
+    await buildMasterSnapshots(payload);
 
   const purchaseType =
     payload.purchaseType ||
@@ -148,13 +149,18 @@ exports.create = async (req, res) => {
 
   const documentHeading =
     payload.documentHeading ||
-    `${String(purchaseType).toUpperCase()} PURCHASE ORDER`;
+    `${String(
+      purchaseType
+    ).toUpperCase()} PURCHASE ORDER`;
 
   // =====================================================
   // 4. ITEMS
   // =====================================================
   const allowManual =
-    hasPermission(req, "po.manual_item");
+    hasPermission(
+      req,
+      "po.manual_item"
+    );
 
   const itemSnapshots =
     await buildItemSnapshots(
@@ -174,15 +180,22 @@ exports.create = async (req, res) => {
   // =====================================================
   // 6. CALCULATION
   // =====================================================
-  const calculated = calculatePO({
-    items: itemSnapshots,
-    charges: payload.charges,
-    roundingOff:
-      payload.roundingOff ??
-      payload.totals?.roundingOff ??
-      0,
-    currency
-  });
+  const calculated =
+    calculatePO({
+      items:
+        itemSnapshots,
+
+      charges:
+        payload.charges,
+
+      roundingOff:
+        payload.roundingOff ??
+        payload.totals
+          ?.roundingOff ??
+        0,
+
+      currency
+    });
 
   // =====================================================
   // 7. PO NUMBER
@@ -195,27 +208,24 @@ exports.create = async (req, res) => {
 
   // =====================================================
   // 8. HEADER
-  //
-  // Payment Summary is NOT taken manually.
-  // It comes from Payment Terms Master.
-po.header = normalizeHeader(
-  {
-    ...payload,
+  // PAYMENT SUMMARY COMES FROM PAYMENT MASTER
+  // =====================================================
+  const header =
+    normalizeHeader(
+      {
+        ...payload,
 
-    header: {
-      ...(payload.header || {}),
+        header: {
+          ...(payload.header || {}),
 
-      // ==================================
-      // AUTO FROM PAYMENT MASTER
-      // ==================================
-      paymentSummary:
-        paymentTerm.paymentSummary
-    }
-  },
-  snapshots,
-  req.user,
-  po.toObject().header
-);
+          paymentSummary:
+            paymentTerm.paymentSummary
+        }
+      },
+      snapshots,
+      req.user,
+      {}
+    );
 
   // =====================================================
   // 9. PAYMENT TERM SNAPSHOT
@@ -237,90 +247,101 @@ po.header = normalizeHeader(
   // =====================================================
   // 10. CREATE PO
   // =====================================================
-  const po = await PurchaseOrder.create({
-    poNumber,
+  const po =
+    await PurchaseOrder.create({
+      poNumber,
 
-    revisionNo: 0,
+      revisionNo: 0,
 
-    poDate:
-      payload.poDate,
+      poDate:
+        payload.poDate,
 
-    documentHeading,
+      documentHeading,
 
-    purchaseType,
+      purchaseType,
 
-    poType:
-      payload.poType,
+      poType:
+        payload.poType,
 
-    currency,
+      currency,
 
-    company:
-      snapshots.company,
+      company:
+        snapshots.company,
 
-    vendor:
-      snapshots.vendor,
+      vendor:
+        snapshots.vendor,
 
-    delivery:
-      snapshots.delivery,
+      delivery:
+        snapshots.delivery,
 
-    costCenter:
-      snapshots.costCenter,
+      costCenter:
+        snapshots.costCenter,
 
-    project:
-      snapshots.project,
+      project:
+        snapshots.project,
 
-    // ==========================================
-    // NEW PAYMENT MASTER SNAPSHOT
-    // ==========================================
-    paymentTerm:
-      paymentTermSnapshot,
+      // ==========================================
+      // PAYMENT TERM MASTER SNAPSHOT
+      // ==========================================
+      paymentTerm:
+        paymentTermSnapshot,
 
-    header,
+      header,
 
-    items:
-      calculated.items,
+      items:
+        calculated.items,
 
-    charges:
-      calculated.charges,
+      charges:
+        calculated.charges,
 
-    totals:
-      calculated.totals,
+      totals:
+        calculated.totals,
 
-    specificTerms:
-      terms.specificTerms,
+      specificTerms:
+        terms.specificTerms,
 
-    generalTerms:
-      terms.generalTerms,
+      generalTerms:
+        terms.generalTerms,
 
-    approval: {
-      required:
-        approvalRequired()
-    },
+      approval: {
+        required:
+          approvalRequired()
+      },
 
-    status:
-      PO_STATUS.DRAFT,
+      status:
+        PO_STATUS.DRAFT,
 
-    createdBy:
-      req.user.id,
+      createdBy:
+        req.user.id,
 
-    updatedBy:
-      req.user.id
-  });
+      updatedBy:
+        req.user.id
+    });
 
   // =====================================================
   // 11. AUDIT
   // =====================================================
   await writeAudit({
     po,
-    action: "CREATED",
-    userId: req.user.id,
-    after: po.toObject()
+    action:
+      "CREATED",
+
+    userId:
+      req.user.id,
+
+    after:
+      po.toObject()
   });
 
-  return res.status(201).json({
-    success: true,
-    data: po
-  });
+  // =====================================================
+  // 12. RESPONSE
+  // =====================================================
+  return res
+    .status(201)
+    .json({
+      success: true,
+      data: po
+    });
 };
 
 exports.update = async (req, res) => {
