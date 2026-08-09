@@ -11,27 +11,123 @@ function pdfRoot() {
 }
 
 async function renderPdfBuffer(po, { preview = false } = {}) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  let browser;
 
   try {
-    const page = await browser.newPage();
-    const html = buildPOHtml(po.toObject ? po.toObject() : po, { preview });
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    const executablePath =
+      puppeteer.executablePath();
 
-    const buffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      displayHeaderFooter: true,
-      margin: { top: "18mm", right: "12mm", bottom: "17mm", left: "12mm" },
-      headerTemplate: `<div style="font-family:Courier New,monospace;font-size:8px;width:100%;text-align:right;padding:0 12mm;color:#333;">${po.documentHeading || "PURCHASE ORDER"}</div>`,
-      footerTemplate: `<div style="font-family:Courier New,monospace;font-size:8px;width:100%;padding:0 12mm;display:flex;justify-content:space-between;color:#555;"><span>${po.company?.companyName || ""}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`
+    console.log(
+      "[PDF] Puppeteer executable:",
+      executablePath
+    );
+
+    console.log(
+      "[PDF] Executable exists:",
+      fs.existsSync(executablePath)
+    );
+
+    browser = await puppeteer.launch({
+      headless: true,
+
+      executablePath,
+
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage"
+      ]
     });
+
+    const page =
+      await browser.newPage();
+
+    const html =
+      buildPOHtml(
+        po.toObject
+          ? po.toObject()
+          : po,
+        { preview }
+      );
+
+    await page.setContent(
+      html,
+      {
+        waitUntil: "networkidle0",
+        timeout: 30000
+      }
+    );
+
+    const buffer =
+      await page.pdf({
+        format: "A4",
+
+        printBackground: true,
+
+        displayHeaderFooter: true,
+
+        margin: {
+          top: "18mm",
+          right: "12mm",
+          bottom: "17mm",
+          left: "12mm"
+        },
+
+        headerTemplate: `
+          <div style="
+            font-family:Courier New,monospace;
+            font-size:8px;
+            width:100%;
+            text-align:right;
+            padding:0 12mm;
+            color:#333;
+          ">
+            ${po.documentHeading || "PURCHASE ORDER"}
+          </div>
+        `,
+
+        footerTemplate: `
+          <div style="
+            font-family:Courier New,monospace;
+            font-size:8px;
+            width:100%;
+            padding:0 12mm;
+            display:flex;
+            justify-content:space-between;
+            color:#555;
+          ">
+            <span>
+              ${po.company?.companyName || ""}
+            </span>
+
+            <span>
+              Page
+              <span class="pageNumber"></span>
+              of
+              <span class="totalPages"></span>
+            </span>
+          </div>
+        `
+      });
+
+    console.log(
+      `[PDF] Generated successfully: ${buffer.length} bytes`
+    );
+
     return Buffer.from(buffer);
+
+  } catch (error) {
+    console.error(
+      "[PDF] Generation failed:",
+      error
+    );
+
+    throw error;
+
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
