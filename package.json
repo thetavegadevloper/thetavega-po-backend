@@ -14,7 +14,7 @@
     "test": "npm run check && npm run test:core"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12.0 <23"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
