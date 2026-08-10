@@ -345,6 +345,9 @@ exports.create = async (req, res) => {
 };
 
 exports.update = async (req, res) => {
+  // =====================================================
+  // 1. FIND PURCHASE ORDER
+  // =====================================================
   const po = await PurchaseOrder.findById(req.params.id);
 
   if (!po) {
@@ -354,27 +357,66 @@ exports.update = async (req, res) => {
     );
   }
 
-  if (
-    ![
-      PO_STATUS.DRAFT,
-      PO_STATUS.REJECTED
-    ].includes(po.status)
-  ) {
+  // =====================================================
+  // 2. ALLOWED EDIT STATUSES
+  //
+  // Draft             -> Editable
+  // Rejected          -> Editable
+  // Pending Approval  -> Editable
+  // Approved          -> Editable
+  // Issued            -> Editable
+  //
+  // Cancelled / Closed -> Locked
+  // =====================================================
+  const editableStatuses = [
+    PO_STATUS.DRAFT,
+    PO_STATUS.REJECTED,
+    PO_STATUS.PENDING_APPROVAL,
+    PO_STATUS.APPROVED,
+    PO_STATUS.ISSUED
+  ];
+
+  if (!editableStatuses.includes(po.status)) {
     throw new ApiError(
       409,
       `PO cannot be edited in ${po.status} status`
     );
   }
 
-  // ==========================================
-  // REQUEST PAYLOAD
-  // Declare this ONLY ONCE
-  // ==========================================
+  // =====================================================
+  // 3. PRESERVE CURRENT STATUS
+  // =====================================================
+  const currentStatus = po.status;
+
+  // =====================================================
+  // 4. REQUEST PAYLOAD
+  // =====================================================
   const payload = req.body || {};
 
-  // ==========================================
-  // PAYMENT TERM
-  // ==========================================
+  // =====================================================
+  // 5. STORE BEFORE DATA FOR AUDIT
+  // =====================================================
+  const before = po.toObject();
+
+  // =====================================================
+  // 6. IF ISSUED PO HAS EXISTING PDF,
+  //    KEEP ITS CURRENT PATH / VERSION
+  //
+  //    After editing Issued PO:
+  //    - old PDF must NOT be used
+  //    - next download generates updated PDF
+  // =====================================================
+  const existingPdfPath =
+    currentStatus === PO_STATUS.ISSUED
+      ? getStoredPdfPath(po.pdf?.storageKey)
+      : null;
+
+  const previousPdfVersion =
+    Number(po.pdf?.version || 0);
+
+  // =====================================================
+  // 7. PAYMENT TERM
+  // =====================================================
   const paymentTermId =
     payload.paymentTermId ||
     po.paymentTerm?.paymentTermId;
@@ -399,29 +441,27 @@ exports.update = async (req, res) => {
     );
   }
 
-  const before = po.toObject();
-
-  // ==========================================
-  // SOURCE PAYLOAD
-  // ==========================================
+  // =====================================================
+  // 8. SOURCE PAYLOAD
+  // =====================================================
   const sourcePayload = {
     ...payload,
 
     companyId:
       payload.companyId ||
-      po.company.companyId,
+      po.company?.companyId,
 
     vendorId:
       payload.vendorId ||
-      po.vendor.vendorId,
+      po.vendor?.vendorId,
 
     deliveryAddressId:
       payload.deliveryAddressId ||
-      po.delivery.deliveryAddressId,
+      po.delivery?.deliveryAddressId,
 
     costCenterId:
       payload.costCenterId ||
-      po.costCenter.costCenterId,
+      po.costCenter?.costCenterId,
 
     projectId:
       payload.projectId !== undefined
@@ -433,51 +473,338 @@ exports.update = async (req, res) => {
       po.poType
   };
 
-  const snapshots = await buildMasterSnapshots(sourcePayload);
-  const purchaseType = payload.purchaseType || snapshots.vendor.purchaseType || po.purchaseType;
-  const currency = payload.currency || snapshots.vendor.currency || po.currency;
-  const allowManual = hasPermission(req, "po.manual_item");
+  // =====================================================
+  // 9. MASTER SNAPSHOTS
+  // =====================================================
+  const snapshots =
+    await buildMasterSnapshots(
+      sourcePayload
+    );
 
-  const rawItems = payload.items || po.items.map((i) => i.toObject());
-  const itemSnapshots = await buildItemSnapshots(rawItems, allowManual);
+  // =====================================================
+  // 10. PURCHASE TYPE
+  // =====================================================
+  const purchaseType =
+    payload.purchaseType ||
+    snapshots.vendor?.purchaseType ||
+    po.purchaseType;
+
+  // =====================================================
+  // 11. CURRENCY
+  // =====================================================
+  const currency =
+    payload.currency ||
+    snapshots.vendor?.currency ||
+    po.currency ||
+    "INR";
+
+  // =====================================================
+  // 12. MANUAL ITEM PERMISSION
+  // =====================================================
+  const allowManual =
+    hasPermission(
+      req,
+      "po.manual_item"
+    );
+
+  // =====================================================
+  // 13. ITEMS
+  // =====================================================
+  const rawItems =
+    payload.items ||
+    po.items.map((item) =>
+      item.toObject()
+    );
+
+  const itemSnapshots =
+    await buildItemSnapshots(
+      rawItems,
+      allowManual
+    );
+
+  // =====================================================
+  // 14. TERMS
+  // =====================================================
   const termsPayload = {
     ...payload,
-    specificTerms: payload.specificTerms || po.specificTerms.map((t) => t.toObject())
-  };
-  const terms = await buildTermSnapshots(termsPayload, snapshots.source.project);
-  const calculated = calculatePO({
-    items: itemSnapshots,
-    charges: payload.charges || po.toObject().charges,
-    roundingOff: payload.roundingOff ?? payload.totals?.roundingOff ?? po.totals.roundingOff,
-    currency
-  });
 
-  po.poDate = payload.poDate || po.poDate;
-  po.documentHeading = payload.documentHeading || `${String(purchaseType).toUpperCase()} PURCHASE ORDER`;
-  po.purchaseType = purchaseType;
-  po.poType = sourcePayload.poType;
-  po.currency = currency;
-  po.company = snapshots.company;
-  po.vendor = snapshots.vendor;
-  po.delivery = snapshots.delivery;
-  po.costCenter = snapshots.costCenter;
-  po.project = snapshots.project;
-  po.header = normalizeHeader(payload, snapshots, req.user, po.toObject().header);
-  if (!po.header.paymentSummary) throw new ApiError(400, "header.paymentSummary is required");
-  po.items = calculated.items;
-  po.charges = calculated.charges;
-  po.totals = calculated.totals;
-  po.specificTerms = terms.specificTerms;
-  po.generalTerms = terms.generalTerms;
-  po.status = PO_STATUS.DRAFT;
-  po.approval.rejectedBy = null;
-  po.approval.rejectedAt = null;
-  po.approval.rejectionReason = "";
-  po.updatedBy = req.user.id;
+    specificTerms:
+      payload.specificTerms ||
+      po.specificTerms.map((term) =>
+        term.toObject()
+      ),
+
+    generalTerms:
+      payload.generalTerms ||
+      po.generalTerms.map((term) =>
+        term.toObject()
+      )
+  };
+
+  const terms =
+    await buildTermSnapshots(
+      termsPayload,
+      snapshots.source.project
+    );
+
+  // =====================================================
+  // 15. CALCULATE PO
+  // =====================================================
+  const calculated =
+    calculatePO({
+      items:
+        itemSnapshots,
+
+      charges:
+        payload.charges ||
+        po.toObject().charges,
+
+      roundingOff:
+        payload.roundingOff ??
+        payload.totals?.roundingOff ??
+        po.totals?.roundingOff ??
+        0,
+
+      currency
+    });
+
+  // =====================================================
+  // 16. UPDATE BASIC DETAILS
+  // =====================================================
+  po.poDate =
+    payload.poDate ||
+    po.poDate;
+
+  po.documentHeading =
+    payload.documentHeading ||
+    `${String(
+      purchaseType
+    ).toUpperCase()} PURCHASE ORDER`;
+
+  po.purchaseType =
+    purchaseType;
+
+  po.poType =
+    sourcePayload.poType;
+
+  po.currency =
+    currency;
+
+  // =====================================================
+  // 17. UPDATE MASTER SNAPSHOTS
+  // =====================================================
+  po.company =
+    snapshots.company;
+
+  po.vendor =
+    snapshots.vendor;
+
+  po.delivery =
+    snapshots.delivery;
+
+  po.costCenter =
+    snapshots.costCenter;
+
+  po.project =
+    snapshots.project;
+
+  // =====================================================
+  // 18. UPDATE PAYMENT TERM SNAPSHOT
+  // =====================================================
+  po.paymentTerm = {
+    paymentTermId:
+      paymentTerm._id,
+
+    paymentCode:
+      paymentTerm.paymentCode,
+
+    paymentName:
+      paymentTerm.paymentName,
+
+    paymentSummary:
+      paymentTerm.paymentSummary
+  };
+
+  // =====================================================
+  // 19. UPDATE HEADER
+  //
+  // Payment Summary always comes from
+  // Payment Term Master
+  // =====================================================
+  po.header =
+    normalizeHeader(
+      {
+        ...payload,
+
+        header: {
+          ...(payload.header || {}),
+
+          paymentSummary:
+            paymentTerm.paymentSummary
+        }
+      },
+
+      snapshots,
+
+      req.user,
+
+      po.toObject().header
+    );
+
+  // =====================================================
+  // 20. UPDATE ITEMS / CHARGES / TOTALS
+  // =====================================================
+  po.items =
+    calculated.items;
+
+  po.charges =
+    calculated.charges;
+
+  po.totals =
+    calculated.totals;
+
+  // =====================================================
+  // 21. UPDATE TERMS
+  // =====================================================
+  po.specificTerms =
+    terms.specificTerms;
+
+  po.generalTerms =
+    terms.generalTerms;
+
+  // =====================================================
+  // 22. IMPORTANT:
+  // PRESERVE CURRENT STATUS
+  //
+  // DO NOT DO:
+  //
+  // po.status = PO_STATUS.DRAFT;
+  //
+  // Because:
+  // Pending Approval stays Pending Approval
+  // Approved stays Approved
+  // Issued stays Issued
+  // =====================================================
+  po.status =
+    currentStatus;
+
+  // =====================================================
+  // 23. ISSUED PO PDF INVALIDATION
+  //
+  // If an Issued PO is edited,
+  // the previously generated official PDF is outdated.
+  //
+  // Clear storageKey so next download automatically
+  // generates the updated PDF.
+  // =====================================================
+  if (
+    currentStatus ===
+    PO_STATUS.ISSUED
+  ) {
+    po.pdf = {
+      // Preserve version.
+      // Next generated PDF becomes version + 1.
+      version:
+        previousPdfVersion,
+
+      storageKey:
+        "",
+
+      generatedAt:
+        null,
+
+      generatedBy:
+        null,
+
+      hash:
+        ""
+    };
+  }
+
+  // =====================================================
+  // 24. UPDATED BY
+  // =====================================================
+  po.updatedBy =
+    req.user.id;
+
+  // =====================================================
+  // 25. SAVE
+  // =====================================================
   await po.save();
 
-  await writeAudit({ po, action: "UPDATED", userId: req.user.id, before, after: po.toObject() });
-  res.json({ success: true, data: po });
+  // =====================================================
+  // 26. DELETE OLD ISSUED PDF FILE
+  //
+  // Database is already pointing away from old PDF.
+  // Remove old file if it still exists.
+  // =====================================================
+  if (
+    currentStatus ===
+      PO_STATUS.ISSUED &&
+    existingPdfPath
+  ) {
+    try {
+      if (
+        fs.existsSync(
+          existingPdfPath
+        )
+      ) {
+        fs.unlinkSync(
+          existingPdfPath
+        );
+
+        console.log(
+          `[PO UPDATE] Old PDF removed: ${existingPdfPath}`
+        );
+      }
+    } catch (error) {
+      // Do not fail PO update only because
+      // old PDF cleanup failed.
+      console.error(
+        "[PO UPDATE] Unable to remove old PDF:",
+        error
+      );
+    }
+  }
+
+  // =====================================================
+  // 27. AUDIT LOG
+  // =====================================================
+  await writeAudit({
+    po,
+
+    action:
+      "UPDATED",
+
+    userId:
+      req.user.id,
+
+    remarks:
+      currentStatus ===
+      PO_STATUS.ISSUED
+        ? "Issued PO updated. Existing official PDF invalidated and will be regenerated."
+        : `PO updated while in ${currentStatus} status`,
+
+    before,
+
+    after:
+      po.toObject()
+  });
+
+  // =====================================================
+  // 28. RESPONSE
+  // =====================================================
+  return res.json({
+    success: true,
+    message:
+      currentStatus ===
+      PO_STATUS.ISSUED
+        ? "Purchase Order updated successfully. Official PDF will be regenerated."
+        : "Purchase Order updated successfully.",
+
+    data:
+      po
+  });
 };
 
 exports.submit = async (req, res) => {

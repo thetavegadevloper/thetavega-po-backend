@@ -80,6 +80,7 @@ function chargeLabel(mode, value) {
 
   return escapeHtml(mode || "");
 }
+
 function renderHighlightedText(text = "", highlights = []) {
   let safeText = escapeHtml(text);
 
@@ -124,7 +125,7 @@ function renderTerms(terms = []) {
         Number(b.displayOrder || 0)
     )
     .map(
-  (term, index, arr) => `
+      (term, index, arr) => `
     <div class="term-row ${
       index === arr.length - 1 ? "last-term-row" : ""
     }">
@@ -146,6 +147,7 @@ function renderTerms(terms = []) {
     )
     .join("");
 }
+
 function renderSpecificTerms(terms = []) {
   return terms
     .slice()
@@ -190,36 +192,15 @@ function buildPOHtml(po, { preview = false } = {}) {
 
   // ===================================================
   // SPECIFIC PO TERMS
+  //
+  // IMPORTANT:
+  // Use the exact text saved in the PO.
+  // Packing & Forwarding and Freight Charges
+  // are NOT overwritten from charges.
   // ===================================================
   const specificTerms = (po.specificTerms || []).map((t) => ({
     ...t,
   }));
-
-  const packing = specificTerms.find(
-    (t) =>
-      t.category === "Packing" ||
-      /packing/i.test(t.title || "")
-  );
-
-  if (packing) {
-    packing.text = chargeLabel(
-      charges.packingMode,
-      charges.packingValue
-    );
-  }
-
-  const freight = specificTerms.find(
-    (t) =>
-      t.category === "Freight" ||
-      /freight/i.test(t.title || "")
-  );
-
-  if (freight) {
-    freight.text = chargeLabel(
-      charges.freightMode,
-      charges.freightValue
-    );
-  }
 
   // ===================================================
   // PREVIEW WATERMARK
@@ -232,12 +213,12 @@ function buildPOHtml(po, { preview = false } = {}) {
     `
     : "";
 
-    const items = po.items || [];
+  const items = po.items || [];
 
-const itemRowHeight = Math.max(
-  55,
-  Math.floor(180 / Math.max(items.length, 1))
-);
+  const itemRowHeight = Math.max(
+    55,
+    Math.floor(180 / Math.max(items.length, 1))
+  );
 
   // ===================================================
   // HTML
@@ -609,16 +590,15 @@ const itemRowHeight = Math.max(
 
 
 
-
-
-
   .term-row strong {
     margin-right: 4px;
   }
+
 .empty-row {
   height: 28px;
   border-bottom: 1px solid #111;
 }
+
   /* ===================================================
      SIGNATORY
   =================================================== */
@@ -775,8 +755,6 @@ ${previewMark}
 
   <!-- =================================================
        DATE + ORDER NUMBER
-
-       Separate horizontal row.
   ================================================= -->
 
   <div class="grid2 date-order">
@@ -815,8 +793,6 @@ ${previewMark}
 
   <div class="grid2 party-details">
 
-    <!-- Vendor -->
-
     <div class="cell">
 
       <strong>
@@ -852,8 +828,6 @@ ${previewMark}
       ${escapeHtml(vendor.panNo)}
 
     </div>
-
-    <!-- Delivery -->
 
     <div class="cell">
 
@@ -899,8 +873,6 @@ ${previewMark}
 
   <div class="grid2 reference">
 
-    <!-- Quote Reference -->
-
     <div class="cell">
 
       <strong>
@@ -926,8 +898,6 @@ ${previewMark}
       ${escapeHtml(header.confirmedBy || "-")}
 
     </div>
-
-    <!-- Project Details -->
 
     <div class="cell">
 
@@ -963,7 +933,12 @@ ${previewMark}
         PAYMENT:
       </strong>
 
-      ${escapeHtml(header.paymentSummary || "-")}
+    ${escapeHtml(
+        po.paymentTerm?.paymentName ||
+        po.paymentTerm?.paymentSummary ||
+        header.paymentSummary ||
+        "-"
+      )}
 
     </div>
 
@@ -990,18 +965,6 @@ ${previewMark}
 
   <!-- =================================================
        MATERIAL ITEM TABLE
-
-       Width allocation:
-       Sr No                5%
-       Material Code       14%
-       Description         30%
-       HSN                  8%
-       Unit                 7%
-       Qty                  6%
-       Rate                14%
-       Total               16%
-                         -----
-                         100%
   ================================================= -->
 
   <table class="items">
@@ -1252,7 +1215,9 @@ ${previewMark}
   <!-- =================================================
        SPECIFIC TERMS
   ================================================= -->
+
 <div class="empty-row"></div>
+
   <div class="section-heading">
     Supply Terms & Conditions :
   </div>
