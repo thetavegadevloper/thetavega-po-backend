@@ -4,44 +4,74 @@ const crypto = require("crypto");
 const puppeteer = require("puppeteer");
 const { buildPOHtml } = require("../templates/poTemplate");
 
+let browserPromise = null;
+
+// =====================================================
+// PDF ROOT
+// =====================================================
 function pdfRoot() {
-  const root = path.resolve(process.cwd(), process.env.PDF_STORAGE_DIR || "storage/pdfs");
-  fs.mkdirSync(root, { recursive: true });
+  const root = path.resolve(
+    process.cwd(),
+    process.env.PDF_STORAGE_DIR || "storage/pdfs"
+  );
+
+  fs.mkdirSync(root, {
+    recursive: true,
+  });
+
   return root;
 }
 
-async function renderPdfBuffer(po, { preview = false } = {}) {
-  let browser;
+// =====================================================
+// REUSE ONE PUPPETEER BROWSER
+// =====================================================
+async function getBrowser() {
+  if (!browserPromise) {
+    browserPromise = puppeteer
+      .launch({
+        headless: true,
+
+        executablePath:
+          puppeteer.executablePath(),
+
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+        ],
+      })
+      .catch((error) => {
+        browserPromise = null;
+        throw error;
+      });
+  }
+
+  const browser = await browserPromise;
+
+  if (!browser.isConnected()) {
+    browserPromise = null;
+    return getBrowser();
+  }
+
+  return browser;
+}
+
+// =====================================================
+// RENDER PDF
+// =====================================================
+async function renderPdfBuffer(
+  po,
+  { preview = false } = {}
+) {
+  const startTime = Date.now();
+
+  const browser =
+    await getBrowser();
+
+  const page =
+    await browser.newPage();
 
   try {
-    const executablePath =
-      puppeteer.executablePath();
-
-    console.log(
-      "[PDF] Puppeteer executable:",
-      executablePath
-    );
-
-    console.log(
-      "[PDF] Executable exists:",
-      fs.existsSync(executablePath)
-    );
-
-    browser = await puppeteer.launch({
-      headless: true,
-
-      executablePath,
-
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
-      ]
-    });
-
-    const page =
-      await browser.newPage();
-
     const html =
       buildPOHtml(
         po.toObject
@@ -50,13 +80,23 @@ async function renderPdfBuffer(po, { preview = false } = {}) {
         { preview }
       );
 
-    await page.setContent(
-      html,
-      {
-        waitUntil: "networkidle0",
-        timeout: 30000
+    // Faster than networkidle0.
+    // Good if your PDF HTML does not depend on
+    // slow external web resources.
+    await page.setContent(html, {
+      waitUntil: "domcontentloaded",
+      timeout: 15000,
+    });
+
+    // Wait for any fonts used by the document.
+    await page.evaluate(async () => {
+      if (
+        document.fonts &&
+        document.fonts.ready
+      ) {
+        await document.fonts.ready;
       }
-    );
+    });
 
     const buffer =
       await page.pdf({
@@ -70,7 +110,7 @@ async function renderPdfBuffer(po, { preview = false } = {}) {
           top: "18mm",
           right: "12mm",
           bottom: "17mm",
-          left: "12mm"
+          left: "12mm",
         },
 
         headerTemplate: `
@@ -107,11 +147,13 @@ async function renderPdfBuffer(po, { preview = false } = {}) {
               <span class="totalPages"></span>
             </span>
           </div>
-        `
+        `,
       });
 
     console.log(
-      `[PDF] Generated successfully: ${buffer.length} bytes`
+      `[PDF] Generated ${po.poNumber} in ${
+        Date.now() - startTime
+      } ms`
     );
 
     return Buffer.from(buffer);
@@ -125,35 +167,103 @@ async function renderPdfBuffer(po, { preview = false } = {}) {
     throw error;
 
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    // Close page only.
+    // DO NOT close Chrome after every PDF.
+    await page.close().catch(() => {});
   }
 }
 
-async function storeOfficialPdf(po, userId) {
-  const buffer = await renderPdfBuffer(po, { preview: false });
-  const version = Number(po.pdf?.version || 0) + 1;
-  const filename = `${po.poNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}-R${po.revisionNo}-V${version}.pdf`;
-  const fullPath = path.join(pdfRoot(), filename);
-  fs.writeFileSync(fullPath, buffer);
+// =====================================================
+// STORE OFFICIAL PDF
+// =====================================================
+async function storeOfficialPdf(
+  po,
+  userId
+) {
+  const buffer =
+    await renderPdfBuffer(
+      po,
+      {
+        preview: false,
+      }
+    );
 
-  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+  const version =
+    Number(
+      po.pdf?.version || 0
+    ) + 1;
+
+  const filename =
+    `${po.poNumber.replace(
+      /[^a-zA-Z0-9_-]/g,
+      "_"
+    )}-R${po.revisionNo}-V${version}.pdf`;
+
+  const fullPath =
+    path.join(
+      pdfRoot(),
+      filename
+    );
+
+  fs.writeFileSync(
+    fullPath,
+    buffer
+  );
+
+  const hash =
+    crypto
+      .createHash("sha256")
+      .update(buffer)
+      .digest("hex");
+
   po.pdf = {
     version,
-    storageKey: filename,
-    generatedAt: new Date(),
-    generatedBy: userId,
-    hash
+    storageKey:
+      filename,
+    generatedAt:
+      new Date(),
+    generatedBy:
+      userId,
+    hash,
   };
+
   await po.save();
-  return { buffer, filename, hash, version, fullPath };
+
+  return {
+    buffer,
+    filename,
+    hash,
+    version,
+    fullPath,
+  };
 }
 
-function getStoredPdfPath(storageKey) {
-  if (!storageKey) return null;
-  const full = path.join(pdfRoot(), path.basename(storageKey));
-  return fs.existsSync(full) ? full : null;
+// =====================================================
+// GET STORED PDF
+// =====================================================
+function getStoredPdfPath(
+  storageKey
+) {
+  if (!storageKey) {
+    return null;
+  }
+
+  const full =
+    path.join(
+      pdfRoot(),
+      path.basename(
+        storageKey
+      )
+    );
+
+  return fs.existsSync(full)
+    ? full
+    : null;
 }
 
-module.exports = { renderPdfBuffer, storeOfficialPdf, getStoredPdfPath };
+module.exports = {
+  renderPdfBuffer,
+  storeOfficialPdf,
+  getStoredPdfPath,
+  getBrowser,
+};
