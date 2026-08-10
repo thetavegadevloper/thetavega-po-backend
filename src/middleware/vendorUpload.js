@@ -1,102 +1,72 @@
-const fs = require("fs");
-const path = require("path");
 const multer = require("multer");
 
 // =====================================================
-// ATTACHMENT STORAGE DIRECTORY
+// VENDOR UPLOAD
+//
+// Files stay temporarily in memory.
+// Vendor Controller will save file.buffer to GridFS.
 // =====================================================
-const root = path.resolve(
-  process.cwd(),
-  process.env.ATTACHMENT_STORAGE_DIR ||
-    "storage/attachments"
-);
-
-fs.mkdirSync(root, {
-  recursive: true
-});
 
 // =====================================================
-// STORAGE CONFIGURATION
+// MEMORY STORAGE
 // =====================================================
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, root);
-  },
+const storage = multer.memoryStorage();
 
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(
-      /[^a-zA-Z0-9._-]/g,
-      "_"
-    );
+// =====================================================
+// FILE FILTER
+// =====================================================
+const fileFilter = (req, file, cb) => {
+  const allowedMimeTypes = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ];
 
-    cb(
-      null,
-      `${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 10)}-${safe}`
-    );
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    return cb(null, true);
   }
-});
+
+  return cb(
+    new Error(
+      "Only PDF, JPG, JPEG, PNG, XLS and XLSX files are allowed"
+    ),
+    false
+  );
+};
 
 // =====================================================
-// MULTER CONFIGURATION
+// MULTER INSTANCE
 // =====================================================
 const upload = multer({
   storage,
 
+  fileFilter,
+
   limits: {
-    fileSize: 15 * 1024 * 1024
+    fileSize: 10 * 1024 * 1024,
   },
-
-  fileFilter: (_req, file, cb) => {
-    const allowed = [
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.ms-excel"
-    ];
-
-    if (
-      !allowed.includes(
-        file.mimetype
-      )
-    ) {
-      return cb(
-        new Error(
-          "Unsupported attachment type"
-        )
-      );
-    }
-
-    cb(null, true);
-  }
 });
 
 // =====================================================
 // VENDOR FILE FIELDS
-// =====================================================
 //
-// gstCertificate  -> 1 GST Certificate
-// panCard         -> 1 PAN Card
-// supportingFiles -> Maximum 10 supporting documents
-//
+// This itself is now an Express middleware function.
 // =====================================================
 const vendorUpload = upload.fields([
   {
     name: "gstCertificate",
-    maxCount: 1
+    maxCount: 1,
   },
-
   {
     name: "panCard",
-    maxCount: 1
+    maxCount: 1,
   },
-
   {
     name: "supportingFiles",
-    maxCount: 10
-  }
+    maxCount: 10,
+  },
 ]);
 
 // =====================================================

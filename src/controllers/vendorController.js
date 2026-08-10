@@ -1,7 +1,9 @@
-const path = require("path");
-
 const Vendor = require("../models/Vendor");
 const ApiError = require("../utils/ApiError");
+
+const {
+  uploadFileToGridFS,
+} = require("../utils/gridFsStorage");
 
 // =====================================================
 // BUILD SEARCH
@@ -21,11 +23,9 @@ function buildSearch(search, fields) {
   );
 
   return {
-    $or: fields.map(
-      (field) => ({
-        [field]: regex
-      })
-    )
+    $or: fields.map((field) => ({
+      [field]: regex,
+    })),
   };
 }
 
@@ -35,7 +35,10 @@ function buildSearch(search, fields) {
 // Multipart/form-data sends objects/arrays as strings.
 // This keeps registeredAddress and contacts working.
 // =====================================================
-function parseJsonField(value, fallback) {
+function parseJsonField(
+  value,
+  fallback
+) {
   if (
     value === undefined ||
     value === null ||
@@ -45,13 +48,16 @@ function parseJsonField(value, fallback) {
   }
 
   if (
-    typeof value === "object"
+    typeof value ===
+    "object"
   ) {
     return value;
   }
 
   try {
-    return JSON.parse(value);
+    return JSON.parse(
+      value
+    );
   } catch {
     return fallback;
   }
@@ -60,9 +66,11 @@ function parseJsonField(value, fallback) {
 // =====================================================
 // NORMALIZE BODY
 // =====================================================
-function normalizeVendorBody(body = {}) {
+function normalizeVendorBody(
+  body = {}
+) {
   const data = {
-    ...body
+    ...body,
   };
 
   // ===================================================
@@ -102,55 +110,20 @@ function normalizeVendorBody(body = {}) {
   ) {
     data.isActive =
       body.isActive === true ||
-      body.isActive === "true";
+      body.isActive ===
+        "true";
   }
 
   // ===================================================
   // IMPORTANT
-  // Do not take file fields directly from req.body.
-  // Files will come from req.files.
+  //
+  // File fields must come only from req.files.
   // ===================================================
   delete data.gstCertificate;
   delete data.panCard;
   delete data.supportingFiles;
 
   return data;
-}
-
-// =====================================================
-// FILE METADATA
-// =====================================================
-function buildFileMetadata(file) {
-  if (!file) {
-    return null;
-  }
-
-  return {
-    originalName:
-      file.originalname,
-
-    fileName:
-      file.filename,
-
-    path:
-      file.path,
-
-    url:
-      `/attachments/${encodeURIComponent(
-        file.filename
-      )}`,
-
-    mimetype:
-      file.mimetype,
-
-    size:
-      Number(
-        file.size || 0
-      ),
-
-    uploadedAt:
-      new Date()
-  };
 }
 
 // =====================================================
@@ -163,7 +136,8 @@ exports.list = async (
   const page =
     Math.max(
       Number(
-        req.query.page || 1
+        req.query.page ||
+          1
       ),
       1
     );
@@ -172,7 +146,8 @@ exports.list = async (
     Math.min(
       Math.max(
         Number(
-          req.query.limit || 50
+          req.query.limit ||
+            50
         ),
         1
       ),
@@ -186,9 +161,9 @@ exports.list = async (
         "vendorName",
         "vendorCode",
         "gstNo",
-        "panNo"
+        "panNo",
       ]
-    )
+    ),
   };
 
   if (
@@ -202,11 +177,11 @@ exports.list = async (
 
   const [
     data,
-    total
+    total,
   ] = await Promise.all([
     Vendor.find(filter)
       .sort({
-        createdAt: -1
+        createdAt: -1,
       })
       .skip(
         (page - 1) *
@@ -217,7 +192,7 @@ exports.list = async (
 
     Vendor.countDocuments(
       filter
-    )
+    ),
   ]);
 
   res.json({
@@ -233,8 +208,8 @@ exports.list = async (
       pages:
         Math.ceil(
           total / limit
-        )
-    }
+        ),
+    },
   });
 };
 
@@ -259,7 +234,7 @@ exports.getById = async (
 
   res.json({
     success: true,
-    data
+    data,
   });
 };
 
@@ -277,14 +252,19 @@ exports.create = async (
 
   // ===================================================
   // GST CERTIFICATE
+  //
+  // Upload actual file to MongoDB GridFS.
+  // Store returned metadata in Vendor.
   // ===================================================
   const gstCertificate =
     req.files
       ?.gstCertificate?.[0];
 
-  if (gstCertificate) {
+  if (
+    gstCertificate
+  ) {
     vendorData.gstCertificate =
-      buildFileMetadata(
+      await uploadFileToGridFS(
         gstCertificate
       );
   }
@@ -296,9 +276,11 @@ exports.create = async (
     req.files
       ?.panCard?.[0];
 
-  if (panCard) {
+  if (
+    panCard
+  ) {
     vendorData.panCard =
-      buildFileMetadata(
+      await uploadFileToGridFS(
         panCard
       );
   }
@@ -311,10 +293,22 @@ exports.create = async (
       ?.supportingFiles ||
     [];
 
-  vendorData.supportingFiles =
-    supportingFiles.map(
-      buildFileMetadata
-    );
+  if (
+    supportingFiles.length
+  ) {
+    vendorData.supportingFiles =
+      await Promise.all(
+        supportingFiles.map(
+          (file) =>
+            uploadFileToGridFS(
+              file
+            )
+        )
+      );
+  } else {
+    vendorData.supportingFiles =
+      [];
+  }
 
   // ===================================================
   // CREATE VENDOR
@@ -326,7 +320,7 @@ exports.create = async (
 
   res.status(201).json({
     success: true,
-    data
+    data,
   });
 };
 
@@ -369,42 +363,55 @@ exports.update = async (
   // ===================================================
   // GST CERTIFICATE
   //
-  // Replace only when a new GST file is uploaded.
-  // Existing file remains unchanged otherwise.
+  // If new file uploaded:
+  // - upload new file to GridFS
+  // - replace Vendor metadata
+  //
+  // Existing GST remains unchanged if no new file.
   // ===================================================
   const gstCertificate =
     req.files
       ?.gstCertificate?.[0];
 
-  if (gstCertificate) {
-    vendor.gstCertificate =
-      buildFileMetadata(
+  if (
+    gstCertificate
+  ) {
+    const gstMetadata =
+      await uploadFileToGridFS(
         gstCertificate
       );
+
+    vendor.gstCertificate =
+      gstMetadata;
   }
 
   // ===================================================
   // PAN CARD
   //
-  // Replace only when a new PAN file is uploaded.
-  // Existing file remains unchanged otherwise.
+  // Existing PAN remains unchanged if no new file.
   // ===================================================
   const panCard =
     req.files
       ?.panCard?.[0];
 
-  if (panCard) {
-    vendor.panCard =
-      buildFileMetadata(
+  if (
+    panCard
+  ) {
+    const panMetadata =
+      await uploadFileToGridFS(
         panCard
       );
+
+    vendor.panCard =
+      panMetadata;
   }
 
   // ===================================================
   // SUPPORTING FILES
   //
-  // New supporting files are ADDED to existing files.
-  // Existing files are not removed.
+  // New supporting files are ADDED.
+  //
+  // Existing supporting files remain.
   // ===================================================
   const newSupportingFiles =
     req.files
@@ -415,8 +422,13 @@ exports.update = async (
     newSupportingFiles.length
   ) {
     const metadata =
-      newSupportingFiles.map(
-        buildFileMetadata
+      await Promise.all(
+        newSupportingFiles.map(
+          (file) =>
+            uploadFileToGridFS(
+              file
+            )
+        )
       );
 
     vendor.supportingFiles = [
@@ -424,7 +436,7 @@ exports.update = async (
         vendor.supportingFiles ||
         []
       ),
-      ...metadata
+      ...metadata,
     ];
   }
 
@@ -435,7 +447,7 @@ exports.update = async (
 
   res.json({
     success: true,
-    data: vendor
+    data: vendor,
   });
 };
 
@@ -464,12 +476,12 @@ exports.setStatus = async (
 
       {
         isActive:
-          req.body.isActive
+          req.body.isActive,
       },
 
       {
         new: true,
-        runValidators: true
+        runValidators: true,
       }
     );
 
@@ -482,6 +494,6 @@ exports.setStatus = async (
 
   res.json({
     success: true,
-    data
+    data,
   });
 };
