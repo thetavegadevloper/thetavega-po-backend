@@ -32,7 +32,7 @@ function addressText(address = {}) {
     address.line1,
     address.line2,
     address.city,
-    address.district,
+   
     address.state,
     address.pincode,
     address.country,
@@ -54,7 +54,7 @@ function companyAddressText(address = {}) {
     address.line1,
     address.line2,
     address.city,
-    address.district,
+     address.state,
     address.pincode,
   ]
     .filter(Boolean)
