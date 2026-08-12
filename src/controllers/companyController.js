@@ -3,6 +3,10 @@ const factory = require("./masterControllerFactory");
 const ApiError = require("../utils/ApiError");
 
 const {
+  allocateNextCode
+} = require("./masterSequenceController");
+
+const {
   State,
   City
 } = require("country-state-city");
@@ -692,6 +696,34 @@ exports.getAreas =
 
 // =====================================================
 // CREATE COMPANY
+//
+// IMPORTANT AUTO CODE FLOW:
+//
+// Open Add Company
+//     ↓
+// Frontend only previews CMP01
+//     ↓
+// NO sequence increment
+//
+// Cancel
+//     ↓
+// Nothing happens
+//
+// Click Save
+//     ↓
+// This CREATE function runs
+//     ↓
+// GST validated first
+//     ↓
+// allocateNextCode("companies")
+//     ↓
+// sequence increments
+//     ↓
+// actual Company Code assigned
+//     ↓
+// Company saved
+//
+// Frontend companyCode is NEVER trusted.
 // =====================================================
 exports.create =
   async (
@@ -702,6 +734,12 @@ exports.create =
       ...req.body
     };
 
+    // =================================================
+    // FIRST VALIDATE / NORMALIZE GST
+    //
+    // Do this before allocating code so an invalid
+    // GST does not consume a sequence number.
+    // =================================================
     if (
       body.gstin
     ) {
@@ -723,6 +761,36 @@ exports.create =
         gst.gstState;
     }
 
+    // =================================================
+    // ACTUAL COMPANY CODE ALLOCATION
+    //
+    // This is the point where sequence increments.
+    // =================================================
+    const {
+      code
+    } =
+      await allocateNextCode(
+        "companies"
+      );
+
+    // =================================================
+    // BACKEND CODE IS FINAL AUTHORITY
+    //
+    // Example:
+    //
+    // Frontend preview = CMP05
+    //
+    // If another user already saved CMP05,
+    // backend may now allocate CMP06.
+    //
+    // Therefore always overwrite frontend value.
+    // =================================================
+    body.companyCode =
+      code;
+
+    // =================================================
+    // PASS FINAL BODY TO EXISTING CREATE
+    // =================================================
     req.body =
       body;
 
@@ -734,16 +802,64 @@ exports.create =
 
 // =====================================================
 // UPDATE COMPANY
+//
+// IMPORTANT:
+//
+// Company Code must NEVER be regenerated or changed.
+//
+// Existing:
+//
+// CMP05
+//
+// Edit Company
+// -> remains CMP05
+//
+// Even if frontend sends:
+//
+// CMP999
+//
+// backend restores:
+// CMP05
 // =====================================================
 exports.update =
   async (
     req,
     res
   ) => {
+    // =================================================
+    // FIND EXISTING COMPANY FIRST
+    // =================================================
+    const existingCompany =
+      await Company.findById(
+        req.params.id
+      )
+        .select(
+          "companyCode"
+        )
+        .lean();
+
+    if (
+      !existingCompany
+    ) {
+      throw new ApiError(
+        404,
+        "Record not found"
+      );
+    }
+
     const body = {
       ...req.body
     };
 
+    // =================================================
+    // KEEP EXISTING COMPANY CODE
+    // =================================================
+    body.companyCode =
+      existingCompany.companyCode;
+
+    // =================================================
+    // GST NORMALIZATION
+    // =================================================
     if (
       body.gstin
     ) {

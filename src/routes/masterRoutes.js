@@ -11,6 +11,18 @@ const userController = require("../controllers/userController");
 
 // =====================================================
 // MASTER AUTO CODE CONTROLLER
+//
+// IMPORTANT:
+//
+// GET /master-code/next
+// is now PREVIEW ONLY.
+//
+// It DOES NOT increment the sequence.
+//
+// Actual increment happens only inside CREATE:
+// - Company controller
+// - Vendor controller
+// - masterControllerFactory
 // =====================================================
 const masterSequenceController = require(
   "../controllers/masterSequenceController"
@@ -26,6 +38,7 @@ const vendorUpload = require("../middleware/vendorUpload");
 // COMPANY CONTROLLER
 //
 // Also contains shared:
+//
 // GST lookup
 // State -> City
 // City -> Area / Post Office
@@ -50,7 +63,43 @@ const router = express.Router();
 router.use(auth);
 
 // =====================================================
-// AUTO MASTER CODE
+// MASTER CODE PREVIEW
+//
+// IMPORTANT:
+//
+// THIS API DOES NOT RESERVE OR INCREMENT A CODE.
+//
+// It only displays what the next code would be.
+//
+// Example:
+//
+// Current vendor sequence:
+//
+// value = 10
+//
+// GET:
+//
+// /api/master-code/next?master=vendors
+//
+// Response:
+//
+// TT11
+//
+// Database sequence remains:
+//
+// value = 10
+//
+// If user closes / cancels Add Vendor:
+//
+// Nothing changes.
+//
+// If user opens Add Vendor again:
+//
+// Still TT11.
+//
+// Sequence increments ONLY when POST /vendors succeeds.
+//
+// =====================================================
 //
 // USED BY:
 //
@@ -116,6 +165,13 @@ function register(
 
   // ===================================================
   // CREATE
+  //
+  // IMPORTANT:
+  //
+  // For auto-code masters, actual sequence allocation
+  // happens inside controller.create().
+  //
+  // Simply opening Add form never reaches this route.
   // ===================================================
   router.post(
     path,
@@ -143,6 +199,8 @@ function register(
 
   // ===================================================
   // UPDATE
+  //
+  // Auto-generated code remains unchanged.
   // ===================================================
   router.put(
     `${path}/:id`,
@@ -258,14 +316,6 @@ router.get(
 //
 // GET
 // /api/companies/location/cities?state=Maharashtra
-//
-// RETURNS:
-//
-// Pune
-// Mumbai
-// Nagpur
-// Nashik
-// etc.
 // =====================================================
 router.get(
   "/companies/location/cities",
@@ -297,15 +347,6 @@ router.get(
 // /api/companies/location/areas
 // ?state=Maharashtra
 // &city=Pune
-//
-// RETURNS:
-//
-// Area / Post Office
-// District
-// Pincode
-// State
-// State Code
-// Country
 // =====================================================
 router.get(
   "/companies/location/areas",
@@ -338,6 +379,11 @@ router.get(
 
 // =====================================================
 // COMPANY CREATE
+//
+// Actual Company Code allocation:
+// allocateNextCode("companies")
+//
+// happens inside companyController.create().
 // =====================================================
 router.post(
   "/companies",
@@ -373,6 +419,8 @@ router.get(
 
 // =====================================================
 // COMPANY UPDATE
+//
+// Existing Company Code remains unchanged.
 // =====================================================
 router.put(
   "/companies/:id",
@@ -399,6 +447,9 @@ router.patch(
 
 // =====================================================
 // COST CENTER
+//
+// Auto code allocated on CREATE:
+// CC01, CC02...
 // =====================================================
 register(
   "/cost-centers",
@@ -417,6 +468,9 @@ register(
 
 // =====================================================
 // PROJECT
+//
+// Auto code allocated on CREATE:
+// PRJ01, PRJ02...
 // =====================================================
 register(
   "/projects",
@@ -444,6 +498,13 @@ register(
 // supportingFiles
 //
 // use multipart file upload.
+//
+// Auto Vendor Code:
+//
+// TT01
+// TT02
+//
+// is allocated ONLY inside vendorController.create().
 // =====================================================
 
 // =====================================================
@@ -462,6 +523,11 @@ router.get(
 
 // =====================================================
 // CREATE VENDOR + FILES
+//
+// Actual sequence increment happens here through:
+//
+// vendorController.create()
+// -> allocateNextCode("vendors")
 // =====================================================
 router.post(
   "/vendors",
@@ -490,6 +556,8 @@ router.get(
 
 // =====================================================
 // UPDATE VENDOR + OPTIONAL NEW FILES
+//
+// Existing Vendor Code remains unchanged.
 // =====================================================
 router.put(
   "/vendors/:id",
@@ -517,6 +585,11 @@ router.patch(
 
 // =====================================================
 // MATERIAL
+//
+// Auto code allocated on CREATE:
+//
+// MAT001
+// MAT002
 // =====================================================
 register(
   "/materials",
@@ -537,6 +610,11 @@ register(
 
 // =====================================================
 // DELIVERY ADDRESS
+//
+// Auto code allocated on CREATE:
+//
+// DEL01
+// DEL02
 // =====================================================
 register(
   "/delivery-addresses",
@@ -556,6 +634,11 @@ register(
 
 // =====================================================
 // PO TERMS
+//
+// Auto code allocated on CREATE:
+//
+// TERM01
+// TERM02
 // =====================================================
 register(
   "/po-terms",
@@ -580,6 +663,8 @@ register(
 
 // =====================================================
 // ROLES
+//
+// No auto-generated master code.
 // =====================================================
 register(
   "/roles",
@@ -597,6 +682,8 @@ register(
 
 // =====================================================
 // USERS
+//
+// No master sequence code.
 // =====================================================
 register(
   "/users",
