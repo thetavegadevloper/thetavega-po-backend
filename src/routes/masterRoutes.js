@@ -11,54 +11,58 @@ const userController = require("../controllers/userController");
 
 // =====================================================
 // MASTER AUTO CODE CONTROLLER
-//
-// IMPORTANT:
-//
-// GET /master-code/next
-// is now PREVIEW ONLY.
-//
-// It DOES NOT increment the sequence.
-//
-// Actual increment happens only inside CREATE:
-// - Company controller
-// - Vendor controller
-// - masterControllerFactory
 // =====================================================
-const masterSequenceController = require(
-  "../controllers/masterSequenceController"
-);
+const masterSequenceController =
+  require("../controllers/masterSequenceController");
 
 // =====================================================
-// VENDOR FILE UPLOAD
+// VENDOR
 // =====================================================
-const vendorController = require("../controllers/vendorController");
-const vendorUpload = require("../middleware/vendorUpload");
+const vendorController =
+  require("../controllers/vendorController");
+
+const vendorUpload =
+  require("../middleware/vendorUpload");
 
 // =====================================================
-// COMPANY CONTROLLER
-//
-// Also contains shared:
-//
-// GST lookup
-// State -> City
-// City -> Area / Post Office
+// COMPANY
 // =====================================================
-const companyController = require("../controllers/companyController");
+const companyController =
+  require("../controllers/companyController");
 
 // =====================================================
 // MODELS
 // =====================================================
-const CostCenter = require("../models/CostCenter");
-const Project = require("../models/Project");
-const Material = require("../models/Material");
-const DeliveryAddress = require("../models/DeliveryAddress");
-const POTerm = require("../models/POTerm");
-const Role = require("../models/Role");
+const CostCenter =
+  require("../models/CostCenter");
+
+const Project =
+  require("../models/Project");
+
+const Material =
+  require("../models/Material");
+
+const DeliveryAddress =
+  require("../models/DeliveryAddress");
+
+// =====================================================
+// IMPORTANT
+// PAYMENT TERM MODEL
+// =====================================================
+const PaymentTerm =
+  require("../models/PaymentTerm");
+
+const POTerm =
+  require("../models/POTerm");
+
+const Role =
+  require("../models/Role");
 
 // =====================================================
 // ROUTER
 // =====================================================
-const router = express.Router();
+const router =
+  express.Router();
 
 router.use(auth);
 
@@ -67,64 +71,19 @@ router.use(auth);
 //
 // IMPORTANT:
 //
-// THIS API DOES NOT RESERVE OR INCREMENT A CODE.
+// This API is PREVIEW ONLY.
 //
-// It only displays what the next code would be.
+// Opening Add:
+// -> displays next code
+// -> does NOT increment sequence
 //
-// Example:
-//
-// Current vendor sequence:
-//
-// value = 10
-//
-// GET:
-//
-// /api/master-code/next?master=vendors
-//
-// Response:
-//
-// TT11
-//
-// Database sequence remains:
-//
-// value = 10
-//
-// If user closes / cancels Add Vendor:
-//
-// Nothing changes.
-//
-// If user opens Add Vendor again:
-//
-// Still TT11.
-//
-// Sequence increments ONLY when POST /vendors succeeds.
-//
-// =====================================================
-//
-// USED BY:
-//
-// Company
-// Vendor
-// Material
-// Project
-// Cost Center
-// Delivery Address
-// Payment Terms
-// PO Terms
-//
-// EXAMPLES:
-//
-// GET /api/master-code/next?master=vendors
-// -> TT01
-//
-// GET /api/master-code/next?master=companies
-// -> CMP01
-//
-// GET /api/master-code/next?master=materials
-// -> MAT001
+// Saving:
+// -> create controller calls allocateNextCode()
+// -> sequence increments
 // =====================================================
 router.get(
   "/master-code/next",
+
   requirePermission(
     P.COMPANY_WRITE,
     P.VENDOR_WRITE,
@@ -135,6 +94,7 @@ router.get(
     P.PAYMENT_WRITE,
     P.TERM_WRITE
   ),
+
   asyncHandler(
     masterSequenceController.getNextCode
   )
@@ -154,10 +114,12 @@ function register(
   // ===================================================
   router.get(
     path,
+
     requirePermission(
       readPermission,
       writePermission
     ),
+
     asyncHandler(
       controller.list
     )
@@ -165,19 +127,14 @@ function register(
 
   // ===================================================
   // CREATE
-  //
-  // IMPORTANT:
-  //
-  // For auto-code masters, actual sequence allocation
-  // happens inside controller.create().
-  //
-  // Simply opening Add form never reaches this route.
   // ===================================================
   router.post(
     path,
+
     requirePermission(
       writePermission
     ),
+
     asyncHandler(
       controller.create
     )
@@ -188,10 +145,12 @@ function register(
   // ===================================================
   router.get(
     `${path}/:id`,
+
     requirePermission(
       readPermission,
       writePermission
     ),
+
     asyncHandler(
       controller.getById
     )
@@ -199,14 +158,14 @@ function register(
 
   // ===================================================
   // UPDATE
-  //
-  // Auto-generated code remains unchanged.
   // ===================================================
   router.put(
     `${path}/:id`,
+
     requirePermission(
       writePermission
     ),
+
     asyncHandler(
       controller.update
     )
@@ -217,9 +176,11 @@ function register(
   // ===================================================
   router.patch(
     `${path}/:id/status`,
+
     requirePermission(
       writePermission
     ),
+
     asyncHandler(
       controller.setStatus
     )
@@ -227,69 +188,11 @@ function register(
 }
 
 // =====================================================
-// COMPANY / GST / ADDRESS COMMON LOOKUPS
-//
-// These lookup APIs are shared by:
-//
-// Company
-// Vendor
-// Delivery Address
-//
-// FLOW:
-//
-// GSTIN
-//   ↓
-// PAN
-// GST State
-// GST State Code
-//
-// Address:
-//
-// State
-//   ↓
-// City Dropdown
-//   ↓
-// Area / Post Office Dropdown
-//   ↓
-// District
-// Pincode
-// State Code
-// Country
-//
-// IMPORTANT:
-//
-// Special routes MUST remain before:
-//
-// /companies/:id
-// =====================================================
-
-// =====================================================
 // GST LOOKUP
-//
-// USED BY:
-//
-// Company:
-// gstin -> pan
-//
-// Vendor:
-// gstNo -> panNo
-//
-// Delivery Address:
-// gstNo -> panNo
-//
-// Example:
-//
-// GET
-// /api/companies/gst/27ABCDE1234F1Z5
-//
-// RETURNS:
-//
-// PAN
-// GST State
-// GST State Code
 // =====================================================
 router.get(
   "/companies/gst/:gstin",
+
   requirePermission(
     P.COMPANY_READ,
     P.COMPANY_WRITE,
@@ -298,27 +201,18 @@ router.get(
     P.DELIVERY_READ,
     P.DELIVERY_WRITE
   ),
+
   asyncHandler(
     companyController.lookupGST
   )
 );
 
 // =====================================================
-// GET CITIES BY STATE
-//
-// USED BY:
-//
-// Company
-// Vendor
-// Delivery Address
-//
-// Example:
-//
-// GET
-// /api/companies/location/cities?state=Maharashtra
+// CITIES BY STATE
 // =====================================================
 router.get(
   "/companies/location/cities",
+
   requirePermission(
     P.COMPANY_READ,
     P.COMPANY_WRITE,
@@ -327,29 +221,18 @@ router.get(
     P.DELIVERY_READ,
     P.DELIVERY_WRITE
   ),
+
   asyncHandler(
     companyController.getCities
   )
 );
 
 // =====================================================
-// GET AREA / POST OFFICE BY CITY
-//
-// USED BY:
-//
-// Company
-// Vendor
-// Delivery Address
-//
-// Example:
-//
-// GET
-// /api/companies/location/areas
-// ?state=Maharashtra
-// &city=Pune
+// AREAS / POST OFFICES
 // =====================================================
 router.get(
   "/companies/location/areas",
+
   requirePermission(
     P.COMPANY_READ,
     P.COMPANY_WRITE,
@@ -358,6 +241,7 @@ router.get(
     P.DELIVERY_READ,
     P.DELIVERY_WRITE
   ),
+
   asyncHandler(
     companyController.getAreas
   )
@@ -368,10 +252,12 @@ router.get(
 // =====================================================
 router.get(
   "/companies",
+
   requirePermission(
     P.COMPANY_READ,
     P.COMPANY_WRITE
   ),
+
   asyncHandler(
     companyController.list
   )
@@ -380,16 +266,17 @@ router.get(
 // =====================================================
 // COMPANY CREATE
 //
-// Actual Company Code allocation:
-// allocateNextCode("companies")
+// Company controller itself calls:
 //
-// happens inside companyController.create().
+// allocateNextCode("companies")
 // =====================================================
 router.post(
   "/companies",
+
   requirePermission(
     P.COMPANY_WRITE
   ),
+
   asyncHandler(
     companyController.create
   )
@@ -397,21 +284,15 @@ router.post(
 
 // =====================================================
 // COMPANY GET BY ID
-//
-// IMPORTANT:
-//
-// Keep AFTER:
-//
-// /companies/gst/:gstin
-// /companies/location/cities
-// /companies/location/areas
 // =====================================================
 router.get(
   "/companies/:id",
+
   requirePermission(
     P.COMPANY_READ,
     P.COMPANY_WRITE
   ),
+
   asyncHandler(
     companyController.getById
   )
@@ -419,14 +300,14 @@ router.get(
 
 // =====================================================
 // COMPANY UPDATE
-//
-// Existing Company Code remains unchanged.
 // =====================================================
 router.put(
   "/companies/:id",
+
   requirePermission(
     P.COMPANY_WRITE
   ),
+
   asyncHandler(
     companyController.update
   )
@@ -437,9 +318,11 @@ router.put(
 // =====================================================
 router.patch(
   "/companies/:id/status",
+
   requirePermission(
     P.COMPANY_WRITE
   ),
+
   asyncHandler(
     companyController.setStatus
   )
@@ -448,20 +331,29 @@ router.patch(
 // =====================================================
 // COST CENTER
 //
-// Auto code allocated on CREATE:
-// CC01, CC02...
+// CC01
+// CC02
+// CC03
 // =====================================================
 register(
   "/cost-centers",
+
   factory(
     CostCenter,
     {
       searchFields: [
         "costCenterName",
         "costCenterCode"
-      ]
+      ],
+
+      autoCodeMaster:
+        "cost-centers",
+
+      autoCodeField:
+        "costCenterCode"
     }
   ),
+
   P.COST_CENTER_READ,
   P.COST_CENTER_WRITE
 );
@@ -469,11 +361,13 @@ register(
 // =====================================================
 // PROJECT
 //
-// Auto code allocated on CREATE:
-// PRJ01, PRJ02...
+// PRJ01
+// PRJ02
+// PRJ03
 // =====================================================
 register(
   "/projects",
+
   factory(
     Project,
     {
@@ -481,90 +375,85 @@ register(
         "projectName",
         "projectCode",
         "customerName"
-      ]
+      ],
+
+      autoCodeMaster:
+        "projects",
+
+      autoCodeField:
+        "projectCode"
     }
   ),
+
   P.PROJECT_READ,
   P.PROJECT_WRITE
 );
 
 // =====================================================
-// VENDOR
-//
-// Vendor handled separately because:
-//
-// gstCertificate
-// panCard
-// supportingFiles
-//
-// use multipart file upload.
-//
-// Auto Vendor Code:
-//
-// TT01
-// TT02
-//
-// is allocated ONLY inside vendorController.create().
-// =====================================================
-
-// =====================================================
-// LIST VENDORS
+// VENDOR LIST
 // =====================================================
 router.get(
   "/vendors",
+
   requirePermission(
     P.VENDOR_READ,
     P.VENDOR_WRITE
   ),
+
   asyncHandler(
     vendorController.list
   )
 );
 
 // =====================================================
-// CREATE VENDOR + FILES
+// VENDOR CREATE
 //
-// Actual sequence increment happens here through:
+// Vendor controller itself calls:
 //
-// vendorController.create()
-// -> allocateNextCode("vendors")
+// allocateNextCode("vendors")
 // =====================================================
 router.post(
   "/vendors",
+
   requirePermission(
     P.VENDOR_WRITE
   ),
+
   vendorUpload,
+
   asyncHandler(
     vendorController.create
   )
 );
 
 // =====================================================
-// GET SINGLE VENDOR
+// VENDOR GET BY ID
 // =====================================================
 router.get(
   "/vendors/:id",
+
   requirePermission(
     P.VENDOR_READ,
     P.VENDOR_WRITE
   ),
+
   asyncHandler(
     vendorController.getById
   )
 );
 
 // =====================================================
-// UPDATE VENDOR + OPTIONAL NEW FILES
-//
-// Existing Vendor Code remains unchanged.
+// VENDOR UPDATE
 // =====================================================
 router.put(
   "/vendors/:id",
+
   requirePermission(
     P.VENDOR_WRITE
   ),
+
   vendorUpload,
+
   asyncHandler(
     vendorController.update
   )
@@ -575,9 +464,11 @@ router.put(
 // =====================================================
 router.patch(
   "/vendors/:id/status",
+
   requirePermission(
     P.VENDOR_WRITE
   ),
+
   asyncHandler(
     vendorController.setStatus
   )
@@ -586,13 +477,13 @@ router.patch(
 // =====================================================
 // MATERIAL
 //
-// Auto code allocated on CREATE:
-//
 // MAT001
 // MAT002
+// MAT003
 // =====================================================
 register(
   "/materials",
+
   factory(
     Material,
     {
@@ -601,9 +492,16 @@ register(
         "description",
         "make",
         "model"
-      ]
+      ],
+
+      autoCodeMaster:
+        "materials",
+
+      autoCodeField:
+        "itemCode"
     }
   ),
+
   P.MATERIAL_READ,
   P.MATERIAL_WRITE
 );
@@ -611,13 +509,13 @@ register(
 // =====================================================
 // DELIVERY ADDRESS
 //
-// Auto code allocated on CREATE:
-//
 // DEL01
 // DEL02
+// DEL03
 // =====================================================
 register(
   "/delivery-addresses",
+
   factory(
     DeliveryAddress,
     {
@@ -625,23 +523,78 @@ register(
         "deliveryCode",
         "name",
         "storePersonName"
-      ]
+      ],
+
+      autoCodeMaster:
+        "delivery-addresses",
+
+      autoCodeField:
+        "deliveryCode"
     }
   ),
+
   P.DELIVERY_READ,
   P.DELIVERY_WRITE
 );
 
 // =====================================================
-// PO TERMS
+// PAYMENT TERMS
 //
-// Auto code allocated on CREATE:
+// THIS WAS MISSING.
+//
+// PY001
+// PY002
+// PY003
+//
+// IMPORTANT:
+//
+// On Add:
+// preview only.
+//
+// On Save:
+// allocateNextCode("payment-terms")
+//
+// Backend overwrites frontend preview paymentCode.
+// =====================================================
+register(
+  "/payment-terms",
+
+  factory(
+    PaymentTerm,
+    {
+      searchFields: [
+        "paymentCode",
+        "paymentName",
+        "paymentSummary"
+      ],
+
+      sort: {
+        displayOrder: 1,
+        createdAt: -1
+      },
+
+      autoCodeMaster:
+        "payment-terms",
+
+      autoCodeField:
+        "paymentCode"
+    }
+  ),
+
+  P.PAYMENT_READ,
+  P.PAYMENT_WRITE
+);
+
+// =====================================================
+// PO TERMS
 //
 // TERM01
 // TERM02
+// TERM03
 // =====================================================
 register(
   "/po-terms",
+
   factory(
     POTerm,
     {
@@ -654,9 +607,16 @@ register(
       sort: {
         scope: 1,
         displayOrder: 1
-      }
+      },
+
+      autoCodeMaster:
+        "po-terms",
+
+      autoCodeField:
+        "termCode"
     }
   ),
+
   P.TERM_READ,
   P.TERM_WRITE
 );
@@ -664,10 +624,11 @@ register(
 // =====================================================
 // ROLES
 //
-// No auto-generated master code.
+// No auto code
 // =====================================================
 register(
   "/roles",
+
   factory(
     Role,
     {
@@ -676,18 +637,19 @@ register(
       ]
     }
   ),
+
   P.ROLE_READ,
   P.ROLE_WRITE
 );
 
 // =====================================================
 // USERS
-//
-// No master sequence code.
 // =====================================================
 register(
   "/users",
+
   userController,
+
   P.USER_READ,
   P.USER_WRITE
 );
@@ -695,4 +657,5 @@ register(
 // =====================================================
 // EXPORT
 // =====================================================
-module.exports = router;
+module.exports =
+  router;

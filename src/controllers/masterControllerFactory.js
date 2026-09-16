@@ -7,12 +7,11 @@ const {
   require("./masterSequenceController");
 
 // =====================================================
-// GENERIC MASTER AUTO-CODE CONFIG
+// GENERIC MASTER AUTO CODE CONFIG
 //
-// Company and Vendor are NOT handled here because
-// they have their own controllers.
+// Company and Vendor have their own controllers.
 //
-// These masters use masterControllerFactory.
+// These generic masters use this factory.
 // =====================================================
 const AUTO_CODE_CONFIG = {
   Material: {
@@ -47,6 +46,20 @@ const AUTO_CODE_CONFIG = {
 };
 
 // =====================================================
+// ESCAPE SEARCH TEXT
+// =====================================================
+function escapeRegex(
+  value
+) {
+  return String(
+    value || ""
+  ).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
+// =====================================================
 // BUILD SEARCH
 // =====================================================
 function buildSearch(
@@ -62,11 +75,8 @@ function buildSearch(
 
   const regex =
     new RegExp(
-      String(
+      escapeRegex(
         search
-      ).replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
       ),
       "i"
     );
@@ -85,27 +95,42 @@ function buildSearch(
 }
 
 // =====================================================
-// GET AUTO CODE CONFIG
+// RESOLVE AUTO CODE CONFIG
 //
-// Uses Mongoose model name.
+// Priority:
 //
-// Examples:
-//
-// Material
-// Project
-// CostCenter
-// DeliveryAddress
-// PaymentTerm
-// POTerm
-//
-// Role will return null because it has no generated code.
+// 1. Explicit config passed from masterRoutes.js
+// 2. Model name fallback
 // =====================================================
 function getAutoCodeConfig(
-  Model
+  Model,
+  autoCodeMaster,
+  autoCodeField
 ) {
+  // ===================================================
+  // EXPLICIT ROUTE CONFIG
+  // ===================================================
+  if (
+    autoCodeMaster &&
+    autoCodeField
+  ) {
+    return {
+      master:
+        autoCodeMaster,
+
+      field:
+        autoCodeField
+    };
+  }
+
+  // ===================================================
+  // FALLBACK USING MODEL NAME
+  // ===================================================
   const modelName =
-    Model?.modelName ||
-    "";
+    String(
+      Model?.modelName ||
+      ""
+    ).trim();
 
   return (
     AUTO_CODE_CONFIG[
@@ -122,11 +147,28 @@ function factory(
   Model,
   {
     searchFields = [],
+
     sort = {
       createdAt: -1
-    }
+    },
+
+    autoCodeMaster =
+      null,
+
+    autoCodeField =
+      null
   } = {}
 ) {
+  // ===================================================
+  // RESOLVE AUTO CODE ONCE
+  // ===================================================
+  const autoCode =
+    getAutoCodeConfig(
+      Model,
+      autoCodeMaster,
+      autoCodeField
+    );
+
   return {
     // =================================================
     // LIST
@@ -196,7 +238,7 @@ function factory(
       }
 
       // ===============================================
-      // FETCH DATA + COUNT
+      // DATA + COUNT
       // ===============================================
       const [
         data,
@@ -280,59 +322,50 @@ function factory(
     // =================================================
     // CREATE
     //
-    // IMPORTANT AUTO CODE FLOW:
+    // IMPORTANT FLOW:
     //
-    // Open form
-    //     ↓
-    // Frontend only previews MAT001 / PRJ01 etc.
-    //     ↓
-    // NO increment
+    // Open Add
+    // -> frontend only previews code
+    // -> no sequence increment
     //
-    // User clicks Cancel
-    //     ↓
-    // Nothing happens
+    // Cancel
+    // -> nothing
     //
-    // User clicks Save
-    //     ↓
-    // CREATE API reaches here
-    //     ↓
-    // allocateNextCode()
-    //     ↓
-    // Sequence increments
-    //     ↓
-    // Backend overwrites frontend preview code
-    //     ↓
-    // Record saved
+    // Save
+    // -> this create() runs
+    // -> allocateNextCode()
+    // -> sequence increments
+    // -> backend code replaces preview code
+    // -> record saved
     // =================================================
     create: async (
       req,
       res
     ) => {
-      // ===============================================
-      // COPY REQUEST BODY
-      //
-      // Do not directly modify req.body.
-      // ===============================================
       const payload = {
         ...req.body
       };
 
       // ===============================================
-      // CHECK WHETHER THIS MASTER HAS AUTO CODE
+      // AUTO CODE
       // ===============================================
-      const autoCode =
-        getAutoCodeConfig(
-          Model
-        );
-
       if (
         autoCode
       ) {
-        // =============================================
-        // ACTUAL CODE ALLOCATION HAPPENS ONLY HERE
-        //
-        // This function performs the MongoDB $inc.
-        // =============================================
+        console.log(
+          "[MASTER AUTO CODE]",
+          {
+            modelName:
+              Model?.modelName,
+
+            master:
+              autoCode.master,
+
+            field:
+              autoCode.field
+          }
+        );
+
         const {
           code
         } =
@@ -341,22 +374,24 @@ function factory(
           );
 
         // =============================================
-        // IMPORTANT
+        // BACKEND CODE IS FINAL
         //
-        // Always overwrite frontend preview.
-        //
-        // Never trust:
-        //
-        // req.body.itemCode
-        // req.body.projectCode
-        // etc.
-        //
-        // Backend sequence is final authority.
+        // Never trust frontend preview code.
         // =============================================
         payload[
           autoCode.field
         ] =
           code;
+
+        console.log(
+          "[MASTER AUTO CODE ALLOCATED]",
+          {
+            master:
+              autoCode.master,
+
+            code
+          }
+        );
       }
 
       // ===============================================
@@ -382,11 +417,7 @@ function factory(
     // =================================================
     // UPDATE
     //
-    // IMPORTANT:
-    //
-    // No sequence generation here.
-    //
-    // Existing master code remains the same.
+    // Existing generated code must NEVER change.
     // =================================================
     update: async (
       req,
@@ -396,16 +427,8 @@ function factory(
         ...req.body
       };
 
-      const autoCode =
-        getAutoCodeConfig(
-          Model
-        );
-
       // ===============================================
-      // PREVENT CHANGING AUTO-GENERATED CODE
-      //
-      // Fetch current record first and force its
-      // existing code back into payload.
+      // PRESERVE EXISTING GENERATED CODE
       // ===============================================
       if (
         autoCode
@@ -436,10 +459,15 @@ function factory(
           ];
       }
 
+      // ===============================================
+      // UPDATE RECORD
+      // ===============================================
       const data =
         await Model.findByIdAndUpdate(
           req.params.id,
+
           payload,
+
           {
             new:
               true,
@@ -522,7 +550,12 @@ function factory(
 }
 
 // =====================================================
-// EXPORT
+// VERY IMPORTANT
+//
+// companyController.js uses:
+//
+// const factory = require("./masterControllerFactory");
+//
+// Therefore we MUST export the function directly.
 // =====================================================
-module.exports =
-  factory;
+module.exports = factory;
