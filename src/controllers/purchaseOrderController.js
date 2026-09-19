@@ -355,6 +355,10 @@ function validateCreatePayload(payload) {
 // LIST PURCHASE ORDERS
 // =====================================================
 
+// =====================================================
+// LIST PURCHASE ORDERS
+// =====================================================
+
 exports.list = async (req, res) => {
   const page = Math.max(
     Number(req.query.page || 1),
@@ -494,6 +498,7 @@ exports.list = async (req, res) => {
   const [data, total] =
     await Promise.all([
       PurchaseOrder.find(filter)
+
         .select(
           [
             "poNumber",
@@ -510,32 +515,88 @@ exports.list = async (req, res) => {
             "status",
             "pdf",
             "creatorApprovalLevel",
+
+            // ===========================================
+            // SUBMISSION DETAILS
+            // ===========================================
+
             "approval.submittedBy",
             "approval.submittedAt",
             "approval.submittedLevel",
+            "approval.submitComment",
+
+            // ===========================================
+            // APPROVAL DETAILS
+            // ===========================================
+
+            "approval.approvedBy",
+            "approval.approvedAt",
+            "approval.approvedLevel",
+            "approval.approvalComment",
+
+            // ===========================================
+            // REJECTION DETAILS
+            // ===========================================
+
+            "approval.rejectedBy",
+            "approval.rejectedAt",
+            "approval.rejectedLevel",
+            "approval.rejectionReason",
+
             "createdAt",
             "updatedAt"
           ].join(" ")
         )
+
+        // ===============================================
+        // WHO SUBMITTED
+        // ===============================================
+
         .populate(
           "approval.submittedBy",
           "name employeeCode email approvalLevel"
         )
+
+        // ===============================================
+        // WHO APPROVED
+        // ===============================================
+
+        .populate(
+          "approval.approvedBy",
+          "name employeeCode email approvalLevel"
+        )
+
+        // ===============================================
+        // WHO REJECTED
+        // ===============================================
+
+        .populate(
+          "approval.rejectedBy",
+          "name employeeCode email approvalLevel"
+        )
+
         .sort({
           poDate: -1,
           createdAt: -1
         })
+
         .skip(
           (page - 1) *
-          limit
+            limit
         )
+
         .limit(limit)
+
         .lean(),
 
       PurchaseOrder.countDocuments(
         filter
       )
     ]);
+
+  // ===================================================
+  // RESPONSE
+  // ===================================================
 
   return res.json({
     success: true,
@@ -544,17 +605,19 @@ exports.list = async (req, res) => {
 
     pagination: {
       page,
+
       limit,
+
       total,
+
       pages:
         Math.ceil(
           total /
-          limit
+            limit
         )
     }
   });
 };
-
 
 // =====================================================
 // GET PURCHASE ORDER
